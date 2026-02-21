@@ -1,21 +1,19 @@
-// DESAFIO: Sistema de Playlist de Música
-// PROBLEMA: Uma aplicação de streaming precisa permitir diferentes formas de navegar por
-// playlists (sequencial, aleatória, por gênero, filtrada). O código atual expõe a
-// estrutura interna das coleções e repete lógica de iteração em vários lugares
-
 using System;
 using System.Collections.Generic;
 using System.Linq;
 
 namespace DesignPatternChallenge
 {
+    // ============================
+    // 1) Modelo
+    // ============================
     public class Song
     {
-        public string Title { get; set; }
-        public string Artist { get; set; }
-        public string Genre { get; set; }
-        public int DurationSeconds { get; set; }
-        public int Year { get; set; }
+        public string Title { get; }
+        public string Artist { get; }
+        public string Genre { get; }
+        public int DurationSeconds { get; }
+        public int Year { get; }
 
         public Song(string title, string artist, string genre, int duration, int year)
         {
@@ -26,129 +24,66 @@ namespace DesignPatternChallenge
             Year = year;
         }
 
-        public override string ToString()
-        {
-            return $"{Title} - {Artist} ({Genre}, {Year})";
-        }
+        public override string ToString() => $"{Title} - {Artist} ({Genre}, {Year})";
     }
 
-    // Problema: Playlist expõe estrutura interna (List)
-    public class Playlist
+    // ============================
+    // 2) Iterator Pattern (Interface)
+    // ============================
+    public interface IIterator<T>
     {
-        public string Name { get; set; }
-        public List<Song> Songs { get; set; } // Expor List diretamente é problemático
-
-        public Playlist(string name)
-        {
-            Name = name;
-            Songs = new List<Song>();
-        }
-
-        public void AddSong(Song song)
-        {
-            Songs.Add(song);
-        }
+        bool HasNext();
+        T Next();
+        void Reset();
     }
 
-    // Cliente precisa implementar diferentes formas de iteração
-    public class MusicPlayer
+    // ============================
+    // 3) Aggregate (Interface): qualquer coleção que "cria iteradores"
+    // ============================
+    public interface IAggregate<T>
     {
-        private Playlist _playlist;
-        private int _currentIndex;
-
-        public MusicPlayer(Playlist playlist)
-        {
-            _playlist = playlist;
-            _currentIndex = 0;
-        }
-
-        // Problema 1: Acesso direto à estrutura interna
-        public void PlaySequential()
-        {
-            Console.WriteLine($"\n=== Tocando {_playlist.Name} (Sequencial) ===");
-            
-            for (int i = 0; i < _playlist.Songs.Count; i++)
-            {
-                Console.WriteLine($"{i + 1}. {_playlist.Songs[i]}");
-            }
-        }
-
-        // Problema 2: Lógica de shuffle implementada aqui
-        public void PlayShuffle()
-        {
-            Console.WriteLine($"\n=== Tocando {_playlist.Name} (Aleatório) ===");
-            
-            var random = new Random();
-            var shuffled = _playlist.Songs.OrderBy(x => random.Next()).ToList();
-            
-            for (int i = 0; i < shuffled.Count; i++)
-            {
-                Console.WriteLine($"{i + 1}. {shuffled[i]}");
-            }
-        }
-
-        // Problema 3: Filtros implementados no cliente
-        public void PlayByGenre(string genre)
-        {
-            Console.WriteLine($"\n=== Tocando {_playlist.Name} (Gênero: {genre}) ===");
-            
-            var filtered = _playlist.Songs.Where(s => s.Genre == genre).ToList();
-            
-            for (int i = 0; i < filtered.Count; i++)
-            {
-                Console.WriteLine($"{i + 1}. {filtered[i]}");
-            }
-        }
-
-        // Problema 4: Navegação customizada requer conhecer estrutura interna
-        public void PlayOldies()
-        {
-            Console.WriteLine($"\n=== Tocando {_playlist.Name} (Antigas) ===");
-            
-            var oldies = _playlist.Songs.Where(s => s.Year < 2000).OrderBy(s => s.Year).ToList();
-            
-            for (int i = 0; i < oldies.Count; i++)
-            {
-                Console.WriteLine($"{i + 1}. {oldies[i]}");
-            }
-        }
-
-        // Problema 5: Diferentes coleções exigem código diferente
-        public void PlayFromArray(Song[] songs)
-        {
-            Console.WriteLine("\n=== Tocando de Array ===");
-            // Código diferente para array
-            for (int i = 0; i < songs.Length; i++)
-            {
-                Console.WriteLine($"{i + 1}. {songs[i]}");
-            }
-        }
-
-        public void PlayFromQueue(Queue<Song> songs)
-        {
-            Console.WriteLine("\n=== Tocando de Fila ===");
-            // Código diferente para Queue
-            int count = 1;
-            while (songs.Count > 0)
-            {
-                var song = songs.Dequeue();
-                Console.WriteLine($"{count++}. {song}");
-            }
-        }
+        IIterator<T> CreateIterator();
     }
 
-    // Problema: Biblioteca de músicas com estrutura personalizada
-    public class MusicLibrary
+    // ============================
+    // 4) Playlist (Aggregate) - NÃO expõe List
+    // ============================
+    public class Playlist : IAggregate<Song>
     {
-        // Estrutura interna complexa (árvore, grafo, etc)
-        private Dictionary<string, List<Song>> _songsByGenre;
-        private Dictionary<string, List<Song>> _songsByArtist;
+        public string Name { get; }
+        private readonly List<Song> _songs = new List<Song>();
 
-        public MusicLibrary()
-        {
-            _songsByGenre = new Dictionary<string, List<Song>>();
-            _songsByArtist = new Dictionary<string, List<Song>>();
-        }
+        public Playlist(string name) => Name = name;
+
+        public void AddSong(Song song) => _songs.Add(song);
+
+        // snapshot interno para o iterador não depender da lista mutável
+        internal IReadOnlyList<Song> Snapshot() => _songs.ToList();
+
+        // Iterador padrão (sequencial)
+        public IIterator<Song> CreateIterator() => new SequentialIterator<Song>(Snapshot());
+
+        // Iteradores personalizados
+        public IIterator<Song> CreateShuffleIterator(int? seed = null) =>
+            new ShuffleIterator<Song>(Snapshot(), seed);
+
+        public IIterator<Song> CreateGenreIterator(string genre) =>
+            new FilterIterator<Song>(
+                Snapshot(),
+                s => string.Equals(s.Genre, genre, StringComparison.OrdinalIgnoreCase)
+            );
+
+        public IIterator<Song> CreateOldiesIterator(int yearCutoff = 2000) =>
+            new FilterIterator<Song>(Snapshot(), s => s.Year < yearCutoff, orderBy: s => s.Year);
+    }
+
+    // ============================
+    // 5) Biblioteca (Aggregate) - estrutura interna complexa NÃO é exposta
+    // ============================
+    public class MusicLibrary : IAggregate<Song>
+    {
+        private readonly Dictionary<string, List<Song>> _songsByGenre = new Dictionary<string, List<Song>>();
+        private readonly Dictionary<string, List<Song>> _songsByArtist = new Dictionary<string, List<Song>>();
 
         public void AddSong(Song song)
         {
@@ -161,20 +96,155 @@ namespace DesignPatternChallenge
             _songsByArtist[song.Artist].Add(song);
         }
 
-        // Problema: Como iterar sobre toda biblioteca sem expor estrutura?
-        public Dictionary<string, List<Song>> GetSongsByGenre()
+        // Iterador que percorre toda a biblioteca sem expor dicionários
+        public IIterator<Song> CreateIterator()
         {
-            return _songsByGenre; // Expõe estrutura interna!
+            // Achatando (flatten) a estrutura interna
+            var allSongs = _songsByGenre.Values.SelectMany(list => list).ToList();
+            return new SequentialIterator<Song>(allSongs);
         }
 
-        // Cliente precisa saber como navegar esta estrutura complexa
+        public IIterator<Song> CreateGenreIterator(string genre)
+        {
+            if (!_songsByGenre.TryGetValue(genre, out var songs))
+                songs = new List<Song>();
+
+            return new SequentialIterator<Song>(songs.ToList());
+        }
+
+        public IIterator<Song> CreateArtistIterator(string artist)
+        {
+            if (!_songsByArtist.TryGetValue(artist, out var songs))
+                songs = new List<Song>();
+
+            return new SequentialIterator<Song>(songs.ToList());
+        }
     }
 
+    // ============================
+    // 6) Iteradores Concretos (Genéricos)
+    // ============================
+    public class SequentialIterator<T> : IIterator<T>
+    {
+        private readonly IReadOnlyList<T> _items;
+        private int _index;
+
+        public SequentialIterator(IReadOnlyList<T> items)
+        {
+            _items = items;
+            _index = 0;
+        }
+
+        public bool HasNext() => _index < _items.Count;
+
+        public T Next()
+        {
+            if (!HasNext()) throw new InvalidOperationException("Sem próximos itens.");
+            return _items[_index++];
+        }
+
+        public void Reset() => _index = 0;
+    }
+
+    public class ShuffleIterator<T> : IIterator<T>
+    {
+        private readonly List<T> _shuffled;
+        private int _index;
+
+        public ShuffleIterator(IReadOnlyList<T> items, int? seed = null)
+        {
+            var rand = seed.HasValue ? new Random(seed.Value) : new Random();
+            _shuffled = items.OrderBy(_ => rand.Next()).ToList();
+            _index = 0;
+        }
+
+        public bool HasNext() => _index < _shuffled.Count;
+
+        public T Next()
+        {
+            if (!HasNext()) throw new InvalidOperationException("Sem próximos itens.");
+            return _shuffled[_index++];
+        }
+
+        public void Reset() => _index = 0;
+    }
+
+    // Iterador com filtro (e ordenação opcional)
+    public class FilterIterator<T> : IIterator<T>
+    {
+        private readonly List<T> _filtered;
+        private int _index;
+
+        public FilterIterator(
+            IReadOnlyList<T> items,
+            Func<T, bool> predicate,
+            Func<T, object> orderBy = null)
+        {
+            IEnumerable<T> query = items.Where(predicate);
+            if (orderBy != null) query = query.OrderBy(orderBy);
+
+            _filtered = query.ToList();
+            _index = 0;
+        }
+
+        public bool HasNext() => _index < _filtered.Count;
+
+        public T Next()
+        {
+            if (!HasNext()) throw new InvalidOperationException("Sem próximos itens.");
+            return _filtered[_index++];
+        }
+
+        public void Reset() => _index = 0;
+    }
+
+    // ============================
+    // 7) Adapters de coleção (Array e Queue) para a MESMA interface
+    // ============================
+    public class ArrayAggregate<T> : IAggregate<T>
+    {
+        private readonly T[] _array;
+        public ArrayAggregate(T[] array) => _array = array ?? Array.Empty<T>();
+        public IIterator<T> CreateIterator() => new SequentialIterator<T>(_array.ToList());
+    }
+
+    public class QueueAggregate<T> : IAggregate<T>
+    {
+        private readonly Queue<T> _queue;
+        public QueueAggregate(Queue<T> queue) => _queue = queue ?? new Queue<T>();
+
+        public IIterator<T> CreateIterator()
+        {
+            // Importante: não consumir (Dequeue) — só snapshot
+            return new SequentialIterator<T>(_queue.ToList());
+        }
+    }
+
+    // ============================
+    // 8) MusicPlayer: só toca qualquer coisa via Iterator
+    // ============================
+    public class MusicPlayer
+    {
+        public void Play(string title, IIterator<Song> iterator)
+        {
+            Console.WriteLine($"\n=== {title} ===");
+
+            int i = 1;
+            while (iterator.HasNext())
+            {
+                Console.WriteLine($"{i++}. {iterator.Next()}");
+            }
+        }
+    }
+
+    // ============================
+    // 9) Demo
+    // ============================
     class Program
     {
         static void Main(string[] args)
         {
-            Console.WriteLine("=== Sistema de Playlist ===");
+            Console.WriteLine("=== Sistema de Playlist (Iterator Pattern) ===");
 
             var playlist = new Playlist("Minhas Favoritas");
             playlist.AddSong(new Song("Bohemian Rhapsody", "Queen", "Rock", 354, 1975));
@@ -184,34 +254,58 @@ namespace DesignPatternChallenge
             playlist.AddSong(new Song("Hotel California", "Eagles", "Rock", 391, 1976));
             playlist.AddSong(new Song("Sweet Child O' Mine", "Guns N' Roses", "Rock", 356, 1987));
 
-            var player = new MusicPlayer(playlist);
+            var player = new MusicPlayer();
 
-            player.PlaySequential();
-            player.PlayShuffle();
-            player.PlayByGenre("Rock");
-            player.PlayOldies();
+            // Playlist: diferentes navegações SEM o player conhecer List
+            player.Play($"Tocando {playlist.Name} (Sequencial)", playlist.CreateIterator());
+            player.Play($"Tocando {playlist.Name} (Aleatório)", playlist.CreateShuffleIterator());
+            player.Play($"Tocando {playlist.Name} (Gênero: Rock)", playlist.CreateGenreIterator("Rock"));
+            player.Play($"Tocando {playlist.Name} (Antigas < 2000)", playlist.CreateOldiesIterator());
 
-            Console.WriteLine("\n=== PROBLEMAS ===");
-            Console.WriteLine("✗ Estrutura interna da coleção exposta (List<Song> público)");
-            Console.WriteLine("✗ Lógica de iteração repetida em múltiplos métodos");
-            Console.WriteLine("✗ Cliente depende do tipo de coleção (List, Array, Queue)");
-            Console.WriteLine("✗ Difícil mudar estrutura interna sem quebrar clientes");
-            Console.WriteLine("✗ Não é possível iterar múltiplas coleções uniformemente");
-            Console.WriteLine("✗ Não há forma padrão de pausar/retomar iteração");
-            Console.WriteLine("✗ Filtros e transformações implementados no cliente");
+            // Múltiplas iterações simultâneas (independentes)
+            Console.WriteLine("\n=== Múltiplas iterações simultâneas ===");
+            var it1 = playlist.CreateGenreIterator("Pop");
+            var it2 = playlist.CreateOldiesIterator();
 
-            Console.WriteLine("\n=== Requisitos Não Atendidos ===");
-            Console.WriteLine("• Interface uniforme para diferentes coleções");
-            Console.WriteLine("• Múltiplas iterações simultâneas independentes");
-            Console.WriteLine("• Iteração sem conhecer estrutura interna");
-            Console.WriteLine("• Iteradores personalizados (reverso, circular, preguiçoso)");
-            Console.WriteLine("• Composição de iteradores com filtros");
+            Console.WriteLine("Iterador 1 (Pop) pega 1:");
+            if (it1.HasNext()) Console.WriteLine(it1.Next());
 
-            // Perguntas para reflexão:
-            // - Como acessar elementos sem expor representação interna?
-            // - Como criar interface uniforme para diferentes coleções?
-            // - Como permitir múltiplas travessias simultâneas?
-            // - Como implementar diferentes formas de iteração?
+            Console.WriteLine("Iterador 2 (Oldies) pega 1:");
+            if (it2.HasNext()) Console.WriteLine(it2.Next());
+
+            Console.WriteLine("Iterador 1 (Pop) continua:");
+            while (it1.HasNext()) Console.WriteLine(it1.Next());
+
+            // Array e Queue tocando do MESMO jeito
+            Console.WriteLine("\n=== Tocando de Array e Queue (mesma interface) ===");
+            Song[] arr = {
+                new Song("Numb", "Linkin Park", "Rock", 185, 2003),
+                new Song("Hey Jude", "The Beatles", "Rock", 431, 1968)
+            };
+
+            var q = new Queue<Song>();
+            q.Enqueue(new Song("Shape of You", "Ed Sheeran", "Pop", 233, 2017));
+            q.Enqueue(new Song("Thriller", "Michael Jackson", "Pop", 357, 1982));
+
+            player.Play("Array (Sequencial)", new ArrayAggregate<Song>(arr).CreateIterator());
+            player.Play("Queue (Sequencial)", new QueueAggregate<Song>(q).CreateIterator());
+
+            // Biblioteca com estrutura interna complexa (sem expor dicionários)
+            Console.WriteLine("\n=== Biblioteca (estrutura interna escondida) ===");
+            var library = new MusicLibrary();
+            library.AddSong(new Song("One", "Metallica", "Rock", 447, 1988));
+            library.AddSong(new Song("Smooth", "Santana", "Pop", 295, 1999));
+            library.AddSong(new Song("Back In Black", "AC/DC", "Rock", 255, 1980));
+
+            player.Play("Biblioteca (todas)", library.CreateIterator());
+            player.Play("Biblioteca (Rock)", library.CreateGenreIterator("Rock"));
+
+            Console.WriteLine("\n=== O que foi resolvido ===");
+            Console.WriteLine("✓ Playlist não expõe List internamente");
+            Console.WriteLine("✓ Player não repete lógica de iteração");
+            Console.WriteLine("✓ Iteração uniforme para Playlist/Array/Queue/Library");
+            Console.WriteLine("✓ Iteradores customizados (shuffle, filtro, oldies)");
+            Console.WriteLine("✓ Múltiplas travessias simultâneas e independentes");
         }
     }
 }
